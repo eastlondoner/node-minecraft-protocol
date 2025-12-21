@@ -87,7 +87,7 @@ class Client extends EventEmitter {
       customPackets: this.customPackets,
       noErrorLogging: this.hideErrors
     })
-    
+
     this.emit('state', newState, oldState)
   }
 
@@ -104,17 +104,26 @@ class Client extends EventEmitter {
   }
 
   /**
-   * Connect to server using Bun's native TCP
+   * Connect to server using Bun's native TCP (with optional TLS/mTLS)
+   * 
+   * @param {number} port - Server port
+   * @param {string} host - Server hostname
+   * @param {object} [tlsOptions] - Optional TLS configuration for mTLS
+   * @param {string} [tlsOptions.ca] - CA certificate (PEM) to verify server
+   * @param {string} [tlsOptions.cert] - Client certificate (PEM) for mTLS
+   * @param {string} [tlsOptions.key] - Client private key (PEM) for mTLS
+   * @param {boolean} [tlsOptions.rejectUnauthorized=true] - Reject invalid certs
    */
-  connect(port, host) {
+  connect(port, host, tlsOptions = null) {
     if (!port || !host) {
       throw new Error('port and host are required')
     }
     
     this.ended = false
+    this._tlsEnabled = !!tlsOptions
     const self = this
     
-    Bun.connect({
+    const connectOptions = {
       hostname: host,
       port: port,
       socket: {
@@ -141,7 +150,19 @@ class Client extends EventEmitter {
           self._handleClose()
         },
       },
-    }).catch(err => {
+    }
+    
+    // Add TLS options if provided (for mTLS)
+    if (tlsOptions) {
+      connectOptions.tls = {
+        ca: tlsOptions.ca,
+        cert: tlsOptions.cert,
+        key: tlsOptions.key,
+        rejectUnauthorized: tlsOptions.rejectUnauthorized !== false,
+      }
+    }
+    
+    Bun.connect(connectOptions).catch(err => {
       self.emit('error', err)
       self._handleClose()
     })
@@ -295,7 +316,7 @@ class Client extends EventEmitter {
         const header = Buffer.alloc(sizeOfVarInt(payload.length))
         writeVarInt(payload.length, header, 0)
         payload = Buffer.concat([header, compressed])
-      } else {
+    } else {
         const header = Buffer.alloc(sizeOfVarInt(0))
         writeVarInt(0, header, 0)
         payload = Buffer.concat([header, payload])
