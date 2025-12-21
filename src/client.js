@@ -4,10 +4,14 @@ const EventEmitter = require('events').EventEmitter
 const crypto = require('crypto')
 const zlib = require('zlib')
 const { promisify } = require('util')
+const aesjs = require('aes-js')
 
 const [readVarInt, writeVarInt, sizeOfVarInt] = require('protodef').types.varint
 const { createSerializer, createDeserializer } = require('./transforms/serializer')
 const states = require('./states')
+
+// Check if native aes-128-cfb8 is available (not in Bun)
+const hasNativeCfb8 = crypto.getCiphers().includes('aes-128-cfb8')
 
 const debug = require('debug')('minecraft-protocol')
 const debugSkip = process.env.DEBUG_SKIP?.split(',') ?? []
@@ -353,8 +357,23 @@ class Client extends EventEmitter {
   }
 
   setEncryption(sharedSecret) {
-    this._cipher = crypto.createCipheriv('aes-128-cfb8', sharedSecret, sharedSecret)
-    this._decipher = crypto.createDecipheriv('aes-128-cfb8', sharedSecret, sharedSecret)
+    if (hasNativeCfb8) {
+      // Use native crypto (Node.js)
+      this._cipher = crypto.createCipheriv('aes-128-cfb8', sharedSecret, sharedSecret)
+      this._decipher = crypto.createDecipheriv('aes-128-cfb8', sharedSecret, sharedSecret)
+    } else {
+      // Use aes-js fallback (Bun doesn't support aes-128-cfb8)
+      const cipherAes = new aesjs.ModeOfOperation.cfb(sharedSecret, sharedSecret, 1)
+      const decipherAes = new aesjs.ModeOfOperation.cfb(sharedSecret, sharedSecret, 1)
+      
+      // Create cipher/decipher objects with update() method for compatibility
+      this._cipher = {
+        update: (data) => Buffer.from(cipherAes.encrypt(data))
+      }
+      this._decipher = {
+        update: (data) => Buffer.from(decipherAes.decrypt(data))
+      }
+    }
   }
 
   _handleClose() {
