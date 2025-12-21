@@ -1,44 +1,38 @@
-const net = require('net')
 const dns = require('dns')
 
+/**
+ * TCP/DNS connection setup for Bun-native client.
+ * Handles SRV record lookups for Minecraft servers.
+ */
 module.exports = function (client, options) {
-  // Default options
   options.port = options.port || 25565
   options.host = options.host || 'localhost'
 
   if (!options.connect) {
     options.connect = (client) => {
-      // Use stream if provided
+      // Custom streams not supported in Bun-native implementation
       if (options.stream) {
-        client.setSocket(options.stream)
-        client.emit('connect')
-        return
+        throw new Error('Custom streams not supported - use Bun.connect directly')
       }
 
-      // If port was not defined (defauls to 25565), host is not an ip neither localhost
-      if (options.port === 25565 && net.isIP(options.host) === 0 && options.host !== 'localhost') {
-        // Try to resolve SRV records for the comain
-        dns.resolveSrv('_minecraft._tcp.' + options.host, (err, addresses) => {
-          // Error resolving domain
-          if (err) {
-            // Could not resolve SRV lookup, connect directly
-            client.setSocket(net.connect(options.port, options.host))
-            return
-          }
-
-          // SRV Lookup resolved conrrectly
-          if (addresses && addresses.length > 0) {
+      const { host, port } = options
+      
+      // Check if host is an IP address (IPv4 or IPv6)
+      const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(':')
+      
+      // SRV lookup for non-IP, non-localhost hosts on default port
+      if (port === 25565 && !isIP && host !== 'localhost') {
+        dns.resolveSrv('_minecraft._tcp.' + host, (err, addresses) => {
+          if (!err && addresses?.length > 0) {
             options.host = addresses[0].name
             options.port = addresses[0].port
-            client.setSocket(net.connect(addresses[0].port, addresses[0].name))
+            client.connect(addresses[0].port, addresses[0].name)
           } else {
-            // Otherwise, just connect using the provided hostname and port
-            client.setSocket(net.connect(options.port, options.host))
+            client.connect(port, host)
           }
         })
       } else {
-        // Otherwise, just connect using the provided hostname and port
-        client.setSocket(net.connect(options.port, options.host))
+        client.connect(port, host)
       }
     }
   }

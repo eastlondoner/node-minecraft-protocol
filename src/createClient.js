@@ -1,6 +1,6 @@
 'use strict'
 
-const DefaultClientImpl = require('./client')
+const Client = require('./client')
 const assert = require('assert')
 
 const encrypt = require('./client/encrypt')
@@ -16,45 +16,60 @@ const pluginChannels = require('./client/pluginChannels')
 const versionChecking = require('./client/versionChecking')
 const uuid = require('./datatypes/uuid')
 
-module.exports = createClient
-
-function createClient (options) {
+/**
+ * Create a Minecraft protocol client using Bun's native TCP.
+ */
+module.exports = function createClient(options) {
   assert.ok(options, 'options is required')
   assert.ok(options.username, 'username is required')
-  if (!options.version && !options.realms) { options.version = false }
-  if (options.realms && options.auth !== 'microsoft') throw new Error('Currently Realms can only be joined with auth: "microsoft"')
+  
+  if (!options.version && !options.realms) {
+    options.version = false
+  }
+  
+  if (options.realms && options.auth !== 'microsoft') {
+    throw new Error('Realms requires auth: "microsoft"')
+  }
 
-  // TODO: avoid setting default version if autoVersion is enabled
   const optVersion = options.version || require('./version').defaultVersion
   const mcData = require('minecraft-data')(optVersion)
-  if (!mcData) throw new Error(`unsupported protocol version: ${optVersion}`)
+  
+  if (!mcData) {
+    throw new Error(`Unsupported protocol version: ${optVersion}`)
+  }
+  
   const version = mcData.version
   options.majorVersion = version.majorVersion
   options.protocolVersion = version.version
+  
   const hideErrors = options.hideErrors || false
-  const Client = options.Client || DefaultClientImpl
-
-  const client = new Client(false, version.minecraftVersion, options.customPackets, hideErrors)
+  const ClientImpl = options.Client || Client
+  const client = new ClientImpl(false, version.minecraftVersion, options.customPackets, hideErrors)
 
   tcpDns(client, options)
+
   if (options.auth instanceof Function) {
     options.auth(client, options)
     onReady()
   } else {
     switch (options.auth) {
-      case 'mojang':
-        console.warn('[deprecated] mojang auth servers no longer accept mojang accounts to login. convert your account.\nhttps://help.minecraft.net/hc/en-us/articles/4403181904525-How-to-Migrate-Your-Mojang-Account-to-a-Microsoft-Account')
-        auth(client, options)
-        onReady()
-        break
       case 'microsoft':
         if (options.realms) {
-          microsoftAuth.realmAuthenticate(client, options).then(() => microsoftAuth.authenticate(client, options)).catch((err) => client.emit('error', err)).then(onReady)
+          microsoftAuth.realmAuthenticate(client, options)
+            .then(() => microsoftAuth.authenticate(client, options))
+            .catch(err => client.emit('error', err))
+            .then(onReady)
         } else {
-          microsoftAuth.authenticate(client, options).catch((err) => client.emit('error', err))
+          microsoftAuth.authenticate(client, options)
+            .catch(err => client.emit('error', err))
           onReady()
         }
         break
+        
+      case 'mojang':
+        console.warn('[deprecated] Mojang auth no longer supported')
+        // Fall through to offline
+        
       case 'offline':
       default:
         client.username = options.username
@@ -66,7 +81,7 @@ function createClient (options) {
     }
   }
 
-  function onReady () {
+  function onReady() {
     if (options.version === false) autoVersion(client, options)
     setProtocol(client, options)
     keepalive(client, options)
