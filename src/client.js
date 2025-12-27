@@ -188,6 +188,7 @@ class Client extends EventEmitter {
 
   /**
    * Extract complete packets from buffer
+   * Uses a queue to ensure packets are processed in order even when decompression is async
    */
   _processPackets() {
     // Legacy ping special case
@@ -196,7 +197,7 @@ class Client extends EventEmitter {
       writeVarInt(LEGACY_PING_PACKET_ID, header, 0)
       let payload = this._readBuffer.slice(1)
       if (payload.length === 0) payload = Buffer.from('\0')
-      this._processPacket(Buffer.concat([header, payload]))
+      this._queuePacket(Buffer.concat([header, payload]))
       this._readBuffer = Buffer.alloc(0)
       return
     }
@@ -225,13 +226,43 @@ class Client extends EventEmitter {
       )
       offset += headerSize + packetLength
       
-      this._processPacket(packetData)
+      this._queuePacket(packetData)
     }
     
     // Trim processed data
     if (offset > 0) {
       this._readBuffer = this._readBuffer.slice(offset)
     }
+  }
+  
+  /**
+   * Queue a packet for sequential processing
+   */
+  _queuePacket(packetData) {
+    if (!this._packetQueue) {
+      this._packetQueue = []
+      this._processingPackets = false
+    }
+    this._packetQueue.push(packetData)
+    this._drainPacketQueue()
+  }
+  
+  /**
+   * Process packets from queue sequentially
+   */
+  async _drainPacketQueue() {
+    if (this._processingPackets || !this._packetQueue || this._packetQueue.length === 0) {
+      return
+    }
+    
+    this._processingPackets = true
+    
+    while (this._packetQueue.length > 0) {
+      const packetData = this._packetQueue.shift()
+      await this._processPacket(packetData)
+    }
+    
+    this._processingPackets = false
   }
 
   /**
