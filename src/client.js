@@ -336,7 +336,7 @@ class Client extends EventEmitter {
    */
   async write(name, params) {
     if (this.ended || !this._socket) return
-    
+
     if (debug.enabled && !debugSkip.includes(name)) {
       debug('writing packet ' + this._protocolState + '.' + name)
     }
